@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  acestep-xpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.xpu.optimized
+    container_name: acestep-xpu
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+    environment:
+      - PORT=7860
+      - SERVER_NAME=0.0.0.0
+      - LANGUAGE=en
+      - ACESTEP_CONFIG_PATH=acestep-v15-turbo
+      - ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-4B
+      - ACESTEP_OFFLOAD_TO_CPU=true
+    # For XPU support, you'll need to mount the device
+    devices:
+      - "/dev/dri:/dev/dri"
+    # If using Intel GPU with docker, you may need to add:
+    # privileged: true
+    # or specific device access
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

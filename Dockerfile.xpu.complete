@@ -1,0 +1,96 @@
+# Dockerfile for ACE-Step 1.5 with Intel XPU support
+# Multi-stage build for optimized container size
+
+# Build stage
+FROM python:3.11-slim as builder
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies needed for XPU
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and setup files
+COPY requirements-xpu.txt .
+COPY setup_xpu.sh .
+COPY start_gradio_ui_xpu.sh .
+COPY start_gradio_ui_xpu_manual.sh .
+COPY start_api_server_xpu.sh .
+COPY test_xpu_setup.sh .
+COPY README-LINUX-XPU.md .
+COPY XPU-SETUP-README.md .
+COPY .env.example.xpu .env.example
+
+# Make scripts executable
+RUN chmod +x setup_xpu.sh \
+    start_gradio_ui_xpu.sh \
+    start_gradio_ui_xpu_manual.sh \
+    start_api_server_xpu.sh \
+    test_xpu_setup.sh
+
+# Create a non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+USER appuser
+WORKDIR /home/appuser
+
+# Copy the application code
+COPY --chown=appuser:appuser . /app
+
+# Install XPU dependencies in a virtual environment
+RUN cd /app && \
+    python -m venv venv_xpu && \
+    source venv_xpu/bin/activate && \
+    pip install --upgrade pip && \
+    pip install -r requirements-xpu.txt
+
+# Production stage
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies needed for XPU
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+USER appuser
+WORKDIR /home/appuser
+
+# Copy the virtual environment from builder stage
+COPY --from=builder --chown=appuser:appuser /app/venv_xpu /app/venv_xpu
+
+# Copy application files
+COPY --from=builder --chown=appuser:appuser /app/*.sh /app/
+COPY --from=builder --chown=appuser:appuser /app/README-LINUX-XPU.md /app/
+COPY --from=builder --chown=appuser:appuser /app/XPU-SETUP-README.md /app/
+COPY --from=builder --chown=appuser:appuser /app/.env.example.xpu /app/.env.example
+
+# Make scripts executable
+RUN chmod +x /app/start_gradio_ui_xpu.sh \
+    /app/start_gradio_ui_xpu_manual.sh \
+    /app/start_api_server_xpu.sh
+
+# Expose the default port
+EXPOSE 7860
+
+# Set environment variables for XPU
+ENV SYCL_CACHE_PERSISTENT=1
+ENV SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+ENV PYTORCH_DEVICE=xpu
+ENV TORCH_COMPILE_BACKEND=eager
+ENV TOKENIZERS_PARALLELISM=false
+ENV TORCHAUDIO_USE_BACKEND=ffmpeg
+ENV PATH="/app/venv_xpu/bin:$PATH"
+
+# Copy the application code (excluding venv which is already in the image)
+COPY --chown=appuser:appuser --exclude="venv_xpu" . /app
+
+# Set the default command to run the Gradio UI
+CMD ["/app/start_gradio_ui_xpu.sh"]
